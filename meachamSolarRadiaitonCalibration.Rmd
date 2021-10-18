@@ -1,0 +1,150 @@
+---
+title: "Lux Models"
+author: "S. Katie Fogg"
+date: "April 16, 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+```
+
+## Sunny Station Lux Model (Summer)
+
+```{r, echo=F, message=FALSE, warning=FALSE, comment = ""}
+library(plyr)
+library(RODBC)
+library(stringr)
+library(lubridate)
+library(zoo)
+library(xts)
+
+bcol <- c("red", "orange", "gold", "chartreuse3", "cyan3") 
+
+meacham <- odbcConnect("meacham_heat")
+
+ssunnywslux <- sqlQuery(meacham, "SELECT * 
+                          FROM observations 
+                          WHERE metricIDX IN 
+                              (SELECT metricIDX FROM metrics WHERE metricName = 'Lux') 
+                          AND deploymentIDX IN 
+                              (SELECT deploymentIDX FROM deployments WHERE deploymentName LIKE 'SSunnyWSLux%')")
+ssunnywspy <- sqlQuery(meacham, "SELECT * 
+                          FROM observations 
+                        WHERE metricIDX IN 
+                        (SELECT metricIDX FROM metrics WHERE metricName = 'SolarRadiation') 
+                        AND deploymentIDX IN 
+                        (SELECT deploymentIDX FROM deployments WHERE deploymentName LIKE 'SSunnyWSPyranometerUp%')")
+
+sunnyLuxSolRad <- join(data.frame(observationTime = ssunnywslux$observationTime, sunnyLux = ssunnywslux$value), 
+                       data.frame(observationTime = ssunnywspy$observationTime, sunnySolRad = ssunnywspy$value), 
+                       by = "observationTime", 
+                       type= "inner")
+
+
+# Linear model of solar radiation as a function of Lux
+sunnyLuxCal <- lm(sunnySolRad ~ sunnyLux, data = sunnyLuxSolRad)
+
+summary(sunnyLuxCal)
+
+plot(sunnySolRad ~ sunnyLux, data = sunnyLuxSolRad, ylab = "Pyranometer (W/m2)", xlab = "Lux")
+abline(sunnyLuxCal, col = "violet", lwd = 2)
+
+plot(sunnyLuxSolRad$sunnySolRad, type = "l", ylab = "Pyranometer (W/m2)", xlab = "Time", ylim = c(0, 1500))
+lines((sunnyLuxSolRad$sunnyLux * coef(sunnyLuxCal)[2]) + coef(sunnyLuxCal)[1], col = "blue")
+legend("topleft", c("Pyranometer measurement", "Lux logger measurement"), col = c("black", "blue"), lty = 1, lwd = 1)
+```
+
+
+$\mathrm{kW/m^{2}}$ pyranometer: `r sum(sunnyLuxSolRad$sunnySolRad)`
+
+$\mathrm{kW/m^{2}}$ lux logger: `r sum((sunnyLuxSolRad$sunnyLux * coef(sunnyLuxCal)[2]) + coef(sunnyLuxCal)[1])`
+
+Difference in $\mathrm{kW/m^{2}}$ between the pyranometer measurement and the calibrated lux logger measurements over study time period: `r sum(sunnyLuxSolRad$sunnySolRad) - sum((sunnyLuxSolRad$sunnyLux * coef(sunnyLuxCal)[2]) + coef(sunnyLuxCal)[1])`
+
+## Shady Station Lux Model (Summer)
+
+```{r echo=F, message=FALSE, warning=FALSE, comment = ""}
+sshadywslux <- sqlQuery(meacham, "SELECT * 
+                          FROM observations 
+                        WHERE metricIDX IN 
+                        (SELECT metricIDX FROM metrics WHERE metricName = 'Lux') 
+                        AND deploymentIDX IN 
+                        (SELECT deploymentIDX FROM deployments WHERE deploymentName LIKE 'SShadyWSLux%')")
+sshadywspy <- sqlQuery(meacham, "SELECT * 
+                       FROM observations 
+                       WHERE metricIDX IN 
+                       (SELECT metricIDX FROM metrics WHERE metricName = 'SolarRadiation') 
+                       AND deploymentIDX IN 
+                       (SELECT deploymentIDX FROM deployments WHERE deploymentName LIKE 'SShadyWSPyranometerUp%')")
+
+shadyLuxSolRad <- join(data.frame(observationTime = sshadywslux$observationTime, shadyLux = sshadywslux$value), 
+                       data.frame(observationTime = sshadywspy$observationTime, shadySolRad = sshadywspy$value), 
+                       by = "observationTime", 
+                       type= "inner")
+shadyLuxCal <- lm(shadySolRad ~ shadyLux, data = shadyLuxSolRad)
+summary(shadyLuxCal)
+
+plot(shadySolRad ~ shadyLux, data = shadyLuxSolRad, ylab = "Pyranometer (W/m2)", xlab = "Lux")
+abline(shadyLuxCal, col = "violet", lwd = 2)
+
+plot(shadyLuxSolRad$shadySolRad, type = "l", ylab = "Pyranometer (W/m2)", xlab = "Time", ylim = c(0, 1500))
+lines((shadyLuxSolRad$shadyLux * coef(shadyLuxCal)[2]) + coef(shadyLuxCal)[1], col = "blue")
+legend("topleft", c("Pyranometer measurement", "Lux logger measurement"), col = c("black", "blue"), lty = 1, lwd = 1)
+
+sum(shadyLuxSolRad$shadySolRad) 
+sum((shadyLuxSolRad$shadyLux * coef(shadyLuxCal)[2]) + coef(shadyLuxCal)[1])
+sum(shadyLuxSolRad$shadySolRad) - sum((shadyLuxSolRad$shadyLux * coef(shadyLuxCal)[2]) + coef(shadyLuxCal)[1])
+
+```
+
+$\mathrm{kW/m^{2}}$ pyranometer: `r sum(shadyLuxSolRad$shadySolRad)`
+
+$\mathrm{kW/m^{2}}$ lux logger: `r sum((shadyLuxSolRad$shadyLux * coef(shadyLuxCal)[1]))`
+
+Difference in $\mathrm{kW/m^{2}}$ between the pyranometer measurement and the calibrated lux logger measurements over study time period: `r sum(shadyLuxSolRad$shadySolRad) - sum((shadyLuxSolRad$shadyLux * coef(shadyLuxCal)[1]))`
+
+## Summer Combined Model
+
+```{r echo=F, message=FALSE, warning=FALSE, comment = ""}
+summerLuxSolRad <- join(sunnyLuxSolRad, shadyLuxSolRad, by = "observationTime", type= "inner")
+
+summerLuxSolRadLong <- data.frame(observationTime = rep(summerLuxSolRad$observationTime, times = 2),
+                                  lux = c(summerLuxSolRad$sunnyLux, summerLuxSolRad$shadyLux),
+                                  solRad = c(summerLuxSolRad$sunnySolRad, summerLuxSolRad$shadySolRad),
+                                  site = factor(c(rep("sunny", times = length(summerLuxSolRad$observationTime)), 
+                                                  rep("shady", times = length(summerLuxSolRad$observationTime)))))
+summerCal <- lm(solRad ~ lux * site, data = summerLuxSolRadLong)
+summary(summerCal)
+
+
+summerCal2 <- lm(solRad ~ lux, data = summerLuxSolRadLong)
+summary(summerCal2)
+
+
+plot(solRad ~ lux, data = subset(summerLuxSolRadLong, summerLuxSolRadLong$site == "sunny"))
+points(solRad ~ lux, data = subset(summerLuxSolRadLong, summerLuxSolRadLong$site == "shady"), col ="gray")
+abline(summerCal, col = "gray", lwd = 2)
+abline(coef(summerCal)[1] + coef(summerCal)[3], coef(summerCal)[2] + coef(summerCal)[4], lwd=2)
+
+
+
+
+plot(subset(summerLuxSolRadLong, site == "sunny")$solRad, type = "l")
+lines(subset(summerLuxSolRadLong, site == "shady")$solRad, col = "gray50")
+lines((subset(summerLuxSolRadLong, site == "sunny")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1], col = "blue")
+lines((subset(summerLuxSolRadLong, site == "shady")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1], col = "steelblue")
+
+sum(subset(summerLuxSolRadLong, site == "sunny")$solRad)
+sum((subset(summerLuxSolRadLong, site == "sunny")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1])
+sum(subset(summerLuxSolRadLong, site == "sunny")$solRad) - sum((subset(summerLuxSolRadLong, site == "sunny")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1])
+
+sum(subset(summerLuxSolRadLong, site == "shady")$solRad)
+sum((subset(summerLuxSolRadLong, site == "shady")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1])
+sum(subset(summerLuxSolRadLong, site == "shady")$solRad) - sum((subset(summerLuxSolRadLong, site == "shady")$lux * coef(summerCal2)[2]) + coef(summerCal2)[1])
+```
+
+
+Calibration might be specific to a particular lux logger. Calibrate all lux loggers against the pyranometers???
